@@ -26,9 +26,11 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
 #include <dvdread/dvd_reader.h>
 #include <dvdread/dvd_udf.h>
 #include <dvdcss/dvdcss.h>
+#include <dvdcss/version.h>
 
 #define EX_SUCCESS 0
 #define EX_USAGE (~((~0)<<8))
@@ -157,8 +159,7 @@ int main( int argc, char *argv[] )
 			dvdread_decrypt = 1;
 			break;
 		case 'V':
-			printf( "%s version %s (libdvdcss version %s)\n",
-			  progname, progversion, dvdcss_interface_2 );
+			printf( "%s version %s (libdvdcss version %s)\n", progname, progversion, DVDCSS_VERSION_STRING);
 			exit( EX_SUCCESS );
 			break;
 		case '?':
@@ -180,8 +181,7 @@ int main( int argc, char *argv[] )
 	if( !imgfile ) verbosity++;
 
 	/* Open the DVD */
-	printe( 2, "%s: version %s (libdvdcss version %s)\n",
-	  progname, progversion, dvdcss_interface_2 );
+	printe( 2, "%s: version %s (libdvdcss version %s)\n", progname, progversion, DVDCSS_VERSION_STRING);
 	dvdcss = dvdcss_open( dvdfile );
 	if( dvdcss == NULL ) {
 		printe( 1, "opening of the DVD (%s) with libdvdcss failed\n", dvdfile );

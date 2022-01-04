@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include <dvdcss/dvdcss.h>
+#include <dvdcss/version.h>
 
 #define EX_SUCCESS 0
 #define EX_USAGE (~((~0)<<8))
@@ -102,8 +103,7 @@ int main( int argc, char *argv[] )
 			b_keyonly = 1;
 			break;
 		case 'V':
-			printf( "%s version %s (libdvdcss version %s)\n",
-			  progname, progversion, dvdcss_interface_2 );
+			printf( "%s version %s (libdvdcss version %s)\n", progname, progversion, DVDCSS_VERSION_STRING);
 			exit( EX_SUCCESS );
 			break;
 		case '?':
@@ -126,8 +126,7 @@ int main( int argc, char *argv[] )
 	if( argc >= 3 ) end = (int)strtol( argv[2], (char **)NULL, 0 );
 
 	/* Initialize libdvdcss */
-	printe( 2, "%s version %s (libdvdcss version %s)",
-	  progname, progversion, dvdcss_interface_2 );
+	printe( 2, "%s version %s (libdvdcss version %s)", progname, progversion, DVDCSS_VERSION_STRING);
 	dvdcss = dvdcss_open( (char *)dvdfile );
 	if( dvdcss == NULL )
 	{
