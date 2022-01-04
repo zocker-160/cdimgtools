@@ -1,0 +1,26 @@
+# config.make: generated from config.make.in by configure
+# config.make.in - template for an optional Makefile configuration file
+
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+bindir = @bindir@
+mandir = @mandir@
+docdir = @docdir@
+datarootdir = @datarootdir@
+sysconfdir = @sysconfdir@
+
+@SET_MAKE@
+INSTALL = @INSTALL@
+SED = @SED@
+ASCIIDOC = @ASCIIDOC@
+POD2MAN = @POD2MAN@
+POD2HTML = @POD2HTML@
+XMLTO = @XMLTO@
+
+CPPFLAGS += @CPPFLAGS@
+CFLAGS += @CFLAGS@
+LDFLAGS += @LDFLAGS@
+LIBS += @LIBS@
+	# LIBS is only used for testing
+
+PERL = @PERL@

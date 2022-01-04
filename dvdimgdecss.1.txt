@@ -1,0 +1,150 @@
+// dvdimgdecss.1.txt - manual page documenting the program dvdimgdecss
+// Copyright © 2012 Géraud Meyer
+//   This file is part of dvdimgdecss.
+//
+//   This file is released under the same licensing terms as the source code of
+//   the program which it documents; see the header of the file dvdimgdecss.c.
+
+DVDIMGDECSS(1)
+==============
+:doctype: manpage
+
+
+NAME
+----
+dvdimgdecss - CSS descrambling of raw DVD Video images
+
+
+SYNOPSIS
+--------
+[verse]
+*dvdimgdecss* *-V*
+*dvdimgdecss* [*-v*|*-q*] [*-c*] [*--*] 'dvd'
+*dvdimgdecss* [*-v*|*-q*] [*-c*|*-C*] [*--*] 'dvd' 'file'
+
+
+DESCRIPTION
+-----------
+`dvdimgdecss` is a command line program to remove the CSS scrambling of DVD
+Video image files.
+
+dvdimgdecss uses libdvdread and libdvdcss, and passes them 'dvd' as is.  'dvd'
+can be a drive device file or a raw image file.
+
+If 'file' is not given, dvdimgdecss only computes (and prints) the sector
+ranges corresponding to each file pertaining to the DVD Video.
+
+If 'file' is given, it furthermore copies 'dvd' to 'file', possibly decrypting
+the sector ranges corresponding to VOB files.  The actual reading and
+decryption is done by libdvdcss.
+
+
+OPTIONS
+-------
+*-V*::
+	Print the version information and exit.
+
+*-v*, *-q*::
+	Increase or decrease the level of verbosity of messages printed to
+	stdout/stderr.  The default level is 1, at which only error messages are
+	printed.  At level 0 nothing is printed.  At level 2, each domain (title)
+	is displayed as it is processed.  At level 3, a percentage indicator is
+	displayed.
+	The messages printed by libdvdcss are controlled by the environment
+	variable 'DVDCSS_VERBOSE'; libdvdread's messages cannot be silenced.
+
+*-c*::
+	Make libdvdread search for all the title keys and print the result; while
+	copying and decrypting the 'dvd', enable some consistency checks made by
+	using libdvdread.
+	While decrypting, libdvdcss will nonetheless retrieve the title keys again;
+	if the cache directory is in use, the keys will simply be read from it.
+
+*-C*::
+	Use libdvdread instead of libdvdcss for reading (and decrypting) the VOB
+	streams of the 'dvd'.  This implies *-c*, and avoids a new search of the
+	title keys by libdvdcss.  It is not known (yet) whether libdvdread perform
+	additional checks (compared to libdvdcss alone).
+
+
+ENVIRONMENT VARIABLES
+---------------------
+DVDCSS_*::
+	libdvdcss' environment variables.
+
+DVDREAD_NOKEYS::
+	libdvdread's environment variable.  Setting this variable prevents
+	libdvdread from trying to retrieve all the title keys at once, even when
+	the option *-c* is given.
+
+
+FILES
+-----
+~/.dvdcss::
+	libdvdcss' default cache directory for the title keys.  Setting
+	`DVDCSS_CACHE=off` in the environment disables the use of the cache.
+
+
+EXIT STATUS
+-----------
+To be interpreted as a bitmask, where each bit set indicates a failure.
+Because a usage error always sets all the other bits, the values between 128
+and 254 remain unused; they constitute a range often used by shells (e.g. bash
+or older versions of ksh) to indicate an abnormal process termination (killed
+by a signal).
+
+*0*::
+	No errors.
+
+*255*::
+	Usage error (invalid option or wrong number of arguments).
+
+*64*::
+	I/O error.  If a file could not be opened, the exit status is 127.
+
+*32*::
+	Inconsistencies found (probably because of a bug in dvdimgdecss or its
+	libraries).
+
+*16*::
+	Cancellation due to a memory allocation error.
+
+*8*::
+	No VOBs were found in the DVD; the output file is the same as the 'dvd' if
+	there are no other errors.
+
+
+EXAMPLES
+--------
+If the disc can be read without errors, reading directly from the drive has the
+advantage of making the disc key available to libdvdcss:
+
+[source,sh]
+dvdimgdecss /dev/sr0 dvd.img
+
+It is possible to decrypt a file without a drive (without a disc key);
+furthermore, we bypass the key cache and make libdvdcss print the new keys
+found:
+
+[source,sh]
+DVDCSS_VERBOSE=2 DVDCSS_CACHE=off dvdimgdecss dvd.img dvd.img.decss
+
+You might then burn the image to an optical disc.
+
+
+BUGS
+----
+It seems, after a look at its source code, that libdvdcss does not report all
+the error conditions that it encounters.
+
+See also the CDimg|tools distribution file 'BUGS'.
+
+
+AUTHOR
+------
+dvdimgdecss was written by G.raud Meyer.
+
+
+SEE ALSO
+--------
+linkpage:cssdec[1], lsdvd(1), vobcopy(1), dvdbackup(1)

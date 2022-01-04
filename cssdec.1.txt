@@ -1,0 +1,150 @@
+// cssdec.1.txt - manual page documenting the program cssdec
+// Copyright © 2012 Géraud Meyer
+//   This file is part of cssdec.
+//
+//   This file is released under the same licensing terms as the source code of
+//   the program which it documents; see the header of the file cssdec.c.
+
+CSSDEC(1)
+=========
+:doctype: manpage
+
+
+NAME
+----
+cssdec - simple CSS descrambler using libdvdcss
+
+
+SYNOPSIS
+--------
+[verse]
+*cssdec* *-V*
+*cssdec* ['options'] [*--*]  'target' ['start_sector' ['end_sector']]
+*cssdec* *-k* ['options'] [*--*]  'target' ['start_sector']
+
+
+DESCRIPTION
+-----------
+`cssdec` is a command line program to decrypt sectors of CSS scrambled VOB
+files.  The processed data is output on stdout.
+
+`cssdec` uses libdvdcss directly, and passes it 'target' as is.  'target' can
+be a drive device file or a normal file.
+
+The chosen block to be decrypted should be a VOB stream encrypted with a single
+key; it can be a whole video file copied as is from a mounted DVD disc, or a
+range of sectors of a DVD disc (or of an image thereof) containing a single
+title (or menu).  The sector numbers are computed from the command line
+arguments by the function strtol(3).
+
+The title key used to decrypt the VOB stream is obtained by libdvdcss.
+
+
+OPTIONS
+-------
+*-V*::
+	Print the version information and exit.
+
+*-v*, *-q*::
+	Increase or decrease the level of verbosity of messages printed to stderr.
+	The default level is 1, at which only error messages are printed.  At level
+	0 nothing is printed.  At level 2, a summary as well as some additional
+	messages for noticeable events are printed.  At level 3, information about
+	every processed sector is printed.
+
+*-e*::
+	Modify the exit status as if a read error occured when EOF is reached
+	before the end of the given sector range.
+
+*-o* 'output_file'::
+	Write to the given file instead of the standard output.
+
+*-a*::
+	Open the output file in append mode.
+
+*-k*::
+	Key only mode: exit right after libdvdcss has tried to obtain the title key.
+
+
+ENVIRONMENT VARIABLES
+---------------------
+DVDCSS_*::
+	libdvdcss' environment variables.
+	Setting `DVDCSS_VERBOSE=2` in the environment will make libdvdcss print the
+	title key found.
+
+
+FILES
+-----
+~/.dvdcss::
+	libdvdcss' default cache directory for the title keys.  The cache is used
+	only if the input 'target' is a DVD Video disc (or image file).  Setting
+	`DVDCSS_CACHE=off` in the environment disables the use of the cache.
+
+
+EXIT STATUS
+-----------
+To be interpreted as a bitmask, where each bit set indicates a failure.
+Because a usage error always sets all the other bits, the values between 128
+and 254 remain unused; they constitute a range often used by shells (e.g. bash
+or older versions of ksh) to indicate an abnormal process termination (killed
+by a signal).
+
+*0*::
+	No errors.
+
+*255*::
+	Usage error (invalid option or wrong number of arguments).
+
+*127*::
+	Failure while opening the 'target' or the 'output_file'.
+
+*64*::
+	I/O error, while reading or writing.
+
+*32*::
+	The title key could not be obtained.
+
+*1*::
+	Some sectors could be read but not decrypted.  The data corresponding to
+	these sectors is output, but its content is unknown.
+
+
+EXAMPLES
+--------
+Decrypt a scrambled video file:
+
+[source,sh]
+cp /media/dvd/VIDEO_TS/VTS_01_1.VOB scrambled.VOB
+sectors=$( echo $(ls -l scrambled.VOB |cut -d' ' -f5) / 2048 | bc )
+cssdec -ev scrambled.VOB 0 $sectors >descrambled.VOB
+
+Decrypt a DVD Video title:
+
+[source,sh]
+for file in /media/cdrom/VIDEO_TS/VTS_01_[1-9].VOB; do
+	cssdec $file >> title1.vob
+done
+
+Only print the title key:
+
+[source,sh]
+DVDCSS_VERBOSE=2 cssdec -kv scrambled.VOB
+
+
+BUGS
+----
+If the file size is not a multiple of the sector size (2048 bytes), the last
+partial sector is silently ignored.
+
+See also the CDimg|tools distribution file 'BUGS'.
+
+
+AUTHOR
+------
+cssdec was written by G.raud Meyer.
+
+
+SEE ALSO
+--------
+efdtt(1), vobcopy(1), dvdbackup(1), linkpage:dvdimgdecss[1], strtol(3)

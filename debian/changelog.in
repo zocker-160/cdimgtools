@@ -1,0 +1,5 @@
+cdimgtools (@@VERSION@@-@@RELEASE@@) unstable; urgency=low
+
+  * Packaged by the upstream author.
+
+ -- Géraud Meyer <g_raud@gna.org>  Mon, 19 Nov 2012 10:32:10 +0100

@@ -1,0 +1,264 @@
+#!/usr/bin/perl -w
+# Copyright © 2012 Géraud Meyer <graud@gmx.com>
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License version 2 as
+#   published by the Free Software Foundation.
+#
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+#   or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+#   for more details.
+#
+#   You should have received a copy of the GNU General Public License along
+#   with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=encoding utf-8
+
+=head1 NAME
+
+raw96cdconv - converts between different formats of CD raw images 
+
+=head1 SYNOPSIS
+
+B<raw96cdconv> B<--version>
+
+B<raw96cdconv> S<[ B<-v> ]> S<[ B<-n> ]> S<[ B<-f> ]> S<[ B<-c> | B<-r> ]> S<[ B<-S> ]> S<[ B<-I<C>> I<ext> ]> S<[ I<files> ]>
+
+=cut
+
+use strict;
+
+use Getopt::Long;
+Getopt::Long::Configure('bundling', 'no_auto_abbrev', 'auto_version', 'auto_help');
+
+$main::VERSION = "1.1";
+
+my ($verbose, $no_act, $force, $swab, $subchan, $fullraw);
+my $raw_sect = 2352;
+my $raw = '.raw';
+my $subch = '.subch';
+my $raw96 = '';
+die Getopt::Long::HelpMessage(128)
+	unless GetOptions(
+		'v|verbose!'    => \$verbose,
+		'quiet'         => sub { $verbose = 0 },
+		'n|no-act!'     => \$no_act,
+		'f|force!'      => \$force,
+		'S|swab!'       => \$swab,
+		'sector-size=i' => \$raw_sect,
+		'iso'           => sub { $raw_sect = 2048; $raw = ".iso" },
+		'c|subchan!'    => \$subchan,
+		'r|fullraw!'    => \$fullraw,
+		'D|raw=s'       => \$raw,
+		'C|subch=s'     => \$subch,
+		'R|raw96=s'     => \$raw96,
+		);
+$verbose++ if $no_act;
+
+my $subch_sect = 96;
+my $raw96_sect = $raw_sect + $subch_sect;
+
+if (!@ARGV) {
+	print "Reading filenames from STDIN\n" if $verbose;
+	@ARGV = <STDIN>;
+	chomp(@ARGV);
+}
+
+my $rc = 0;
+FILE: for (@ARGV) {
+	my $src = $_ .(($fullraw) ? $raw : $raw96);
+	my $in_sect = ($fullraw) ? $raw_sect : $raw96_sect;
+	my $dst = $_ .(($fullraw) ? $raw96 : (($subchan) ? $subch : $raw));
+	unless ($force or !-e $dst) {
+		warn "Skipping '$_' because '$dst' already exists\n" if $verbose;
+		$rc++; next FILE;
+	}
+	unless (open SRC, "<", $src) {
+		warn "ERROR Cannot open file '$src' for reading: $!\n";
+		$rc++; next FILE;
+	}
+	binmode SRC;
+	unless ($no_act or open DST, ">", $dst) {
+		warn "ERROR Cannot open file '$dst' for writing: $!\n";
+		$rc++; next FILE;
+	}
+	binmode DST unless $no_act;
+	if ($fullraw) {
+		unless (open SUBCH, "<", $_ .$subch) {
+			warn "ERROR Cannot open file '$_$subch' for reading: $!\n";
+			$rc++; next FILE;
+		}
+		binmode SUBCH;
+	}
+	my $count = 0;
+	my $buf;
+	SECTOR: while (my $n = read SRC, $buf, $in_sect) {
+		unless ($n == $in_sect) {
+			warn "ERROR Partial sector of size $n/$in_sect found in '$src'\n";
+			$rc++; last SECTOR;
+		}
+		if ($fullraw) {
+			$buf = pack '(v)*', unpack('(n)*', $buf) if ($swab);
+			print DST $buf unless $no_act;
+			my $m = read SUBCH, $buf, $subch_sect;
+			unless ($m == $subch_sect) {
+				warn "ERROR Partial sub-channel block of size $m/$subch_sect found in '$_$subch'\n";
+				$rc++; last SECTOR;
+			}
+			print DST $buf unless $no_act;
+		} elsif ($subchan) {
+			print DST substr($buf, $raw_sect) unless $no_act;
+		} else {
+			$buf = pack '(v)*', unpack('(n)*', substr($buf, 0, $raw_sect)) if ($swab);
+			print DST substr($buf, 0, $raw_sect) unless $no_act;
+		}
+		$count++;
+	}
+	print "$count sectors from '$src' written in '$dst'\n" if $verbose;
+} continue {
+	close SRC; close DST; close SUBCH if ($fullraw);
+}
+print "There was $rc errors.\n" if $verbose and $rc;
+exit 1 if $rc;
+
+__END__
+
+=head1 DESCRIPTION
+
+C<raw96cdconv> generates a raw file by extracting raw CD sectors (made up either
+of audio data or of raw data sectors) from a file made up of chunks containing
+both raw data and sub-channel data (RAW+96).  By default F<.raw> is appended to
+the given file names to obtain the corresponding generated file name.  If no
+filenames are given on the command line, filenames will be read via standard
+input.
+
+It is also possible to generate a file containing only sub-channel data or to
+re-generate the full RAW+96 file containing both the raw and the sub-channel
+data.  The default extension for sub-channel files is F<.subch>.
+
+The sector size of raw data is 2352 bytes; the corresponding sub-channel data
+is 96 bytes long, so that the full RAW+96 file is made of chunks of 2448 bytes.
+
+C<raw96cdconv> also works with images containing only data sectors (2048 bytes
+long) and sub-channel data.
+
+
+=head1 OPTIONS
+
+Options can be negated by prefixing them with "--no-" instead of "--".
+
+=over 8
+
+=item B<--version>
+
+Print the version information and exit.
+
+=item B<-v>, B<--verbose>
+
+Verbose: print the names of the files successfully generated as well as their
+number of sectors, print the names of the files completely skipped and at the
+end print the number of files that caused an error.
+
+=item B<-n>, B<--no-act>
+
+No Action: test the reading of files and show what files would have been
+generated.
+
+=item B<-f>, B<--force>
+
+Force: overwrite existing files.
+
+=item B<-S>, B<--swab>
+
+Swap byte: swap the byte order of the raw data; it works for both normal mode
+(raw data extraction) and full raw data mode.  Use it with readcd(1) images
+that contain little endian audio data.
+
+=item B<--sector-size>
+
+By default 2352, which corresponds to audio data (or to a raw sector of any
+data).  Use 2048 for error corrected data sectors.
+
+=item B<--iso>
+
+Same as `B<--raw> .iso B<--sector-size> 2048'.
+
+=item B<-c>, B<--subchan>
+
+Sub-channel mode: generate a file containing only sub-channel data from the
+RAW+96 data file.
+
+=item B<-r>, B<--fullraw>
+
+Full raw data mode: (re-)generate a RAW+96 file containing both raw and
+sub-channel data from the raw file and the sub-channel data file.
+
+=item B<-D>, B<--raw> I<ext>
+
+=item B<-C>, B<--subch> I<ext>
+
+=item B<-R>, B<--raw96> I<ext>
+
+Extension: file name extensions appended to the name given on the command line;
+the first one is for raw files (default: F<.raw>); the second one is for
+sub-channel data files (default: F<.subch>); the third one is for RAW+96 data
+files (default: empty extension).
+
+=back
+
+
+=head1 ENVIRONMENT
+
+No environment variables are used.
+
+
+=head1 EXAMPLES
+
+For example, to generate both a raw file F<image.raw> and a sub-channel file
+F<image.subch>:
+
+	raw96cdconv image
+	raw96cdconv -c image
+
+To re-generate F<image> from F<image.raw> and F<image.subch>:
+
+	raw96cdconv -r image
+
+To generate F<image.raw96> instead of F<image>:
+
+	raw96cdconv -R .raw96 -r image
+
+To extract an iso image F<image.iso> from F<image> that contains both (error
+corrected) data sectors and sub-channel data:
+
+	raw96cdconv --iso image
+
+If F<image> contains the image of a CDDA, it is more appropriate to extract to
+F<image.cdda>:
+
+	raw96cdconv -A .cdda image
+
+To convert the extracted raw audio to WAV, you can use sox(1):
+
+	sox -t .cdda image.cdda image.wav
+
+To convert the extracted 2352b/s raw data to ISO, you can use ccd2iso(1):
+
+	ccd2iso image.raw image.iso
+
+
+=head1 BUGS
+
+No bugs or limitations are known.
+
+See also the CDimg|tools distribution file F<BUGS>.
+
+=head1 AUTHOR
+
+G.raud Meyer
+
+=head1 SEE ALSO
+
+L<cdrdao(1)>, L<readcd(1)>, L<soxformat(7)>, L<ccd2iso(1)>
+
+=cut

@@ -1,0 +1,708 @@
+#!/usr/bin/perl -w
+# Copyright © 2012,2013 Géraud Meyer <graud@gmx.com>
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License version 2 as
+#   published by the Free Software Foundation.
+#
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+#   or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+#   for more details.
+#
+#   You should have received a copy of the GNU General Public License along
+#   with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=encoding utf-8
+
+=head1 NAME
+
+nrgtool - reads and converts/splits Nero optical disc image files (.nrg)
+
+=head1 SYNOPSIS
+
+B<nrgtool> S<{ B<-h> | B<--version> }>
+
+B<nrgtool> S<[ B<-v> ]> S<[ B<-n> ]> S<[ B<-f> ]> S<[ B<-1> ]> S<[ B<-I> ]> I<nrg> S<[ I<cmd> I<args> ]>
+
+=cut
+
+use strict;
+use integer;
+
+use Getopt::Long;
+Getopt::Long::Configure('bundling', 'no_auto_abbrev', 'auto_version', 'auto_help');
+use Pod::Usage;
+use String::Escape qw(printable);
+use Data::Hexdumper qw(hexdump);
+use Fcntl qw(:seek);
+
+$main::VERSION = "0.2";
+
+# Command line
+my ($verbose, $no_act, $force) = (0, undef, undef);
+my ($nrgv, $ext, $iff_ext, $trk_ext) = (2, '', '.iff', '.s%02d-t%02d');
+my ($iff_only, $smallint) = (0, 0);
+die Getopt::Long::HelpMessage(128)
+	unless GetOptions(
+		'h|help'        => sub { Pod::Usage::pod2usage(-exitval => 0, -verbose => 2) },
+		'v|verbose+'    => \$verbose,
+		'q|quiet'       => sub { $verbose = 0 },
+		'n|no-act!'     => \$no_act,
+		'f|force!'      => \$force,
+		'2|nrgv2'       => sub { $nrgv = 2 },
+		'1|nrgv1'       => sub { $nrgv = 1 },
+		'e|extension=s' => \$ext,
+		't|track-ext=s' => \$trk_ext,
+		'i|iff-ext=s'   => \$iff_ext,
+		'I|iff'         => \$iff_only,
+		'3|32'          => \$smallint,
+	) and my $nrg_name = shift;
+$ARGV[0] = "info" unless (@ARGV);
+
+# Data pertaining to the NRG file format IFF structure
+die "ERROR For now only NRG version 2 files are supported" if ($nrgv != 2);
+my $chunk_types;
+my $Q = 'Q>'; # unpack template for 64-bit values
+$Q = 'xxxxN' if ($smallint); # skip the most significant part for 32-bit values
+$chunk_types->{nero} = {
+	code     => "NER5",
+	fields   => [ [ 'iff_offset', 8, $Q ] ],
+};
+$chunk_types->{sinf} = {
+	code     => "SINF",
+	fields   => [ [ 'size', 4, 'N' ], [ 'num_tracks', 4, 'N' ] ],
+};
+$chunk_types->{etnf} = {
+	code     => "ETN2",
+	fields   => [ [ 'size', 4, 'N' ] ],
+	lfields  => [
+		[ 'start', 8, $Q ],
+		[ 'tsize', 8, $Q ],
+		[ 'mode', 4, 'N', [ '0x%08X', '%d' ] ],
+		[ 'lba', 4, 'N' ],
+		[ 'unknown', 4, 'N', [ '0x%08X (always 0)' ] ],
+		[ 'length', 4, 'N' ] ],
+};
+$chunk_types->{daoi} = {
+	code     => "DAOX",
+	fields   => [
+		[ 'size', 4, 'N' ], [ 'le_size', 4, 'N' ],
+		[ 'upc', 13, 'a13' ], [ 'null', 1, 'C', '0x%02X' ],
+		[ 'toc_type', 2, 'n', [ '0x%04x', '%d' ] ],
+		[ 'first_track', 1, 'C' ], [ 'last_track', 1, 'C' ] ],
+	lfields  => [
+		[ 'isrc', 12, 'a12' ],
+		[ 'sector_size', 2, 'n' ], [ 'mode', 2, 'n', '0x%04x' ],
+		[ 'unknown', 2, 'n', '0x%04X (always 1)' ],
+		[ 'index0', 8, $Q ], [ 'index1', 8, $Q ],
+		[ 'next_index', 8, $Q ] ],
+};
+$chunk_types->{cues} = {
+	code     => "CUEX",
+	fields   => [ [ 'size', 4, 'N' ] ],
+	lfields  => [
+		[ 'mode', 1, 'C', [ '0x%02X', '%d' ] ],
+		[ 'track', 1, 'C', '%02X' ], [ 'index', 1, 'C', '%02X' ],
+		[ 'null', 1, 'C', '0x%02X' ], [ 'lba', 4, 'l>' ] ],
+};
+$chunk_types->{relo} = {
+	code     => "RELO",
+	fields   => [ [ 'size', 4, 'N' ], [ 'unknown', 4, 'N', [ '0x%08X', '%d' ] ] ],
+};
+$chunk_types->{toct} = {
+	code     => "TOCT",
+	fields   => [ [ 'size', 4, 'N' ], [ 'unknown', 2, 'n', [ '0x%04X', '%d' ] ] ],
+};
+$chunk_types->{dinf} = {
+	code     => "DINF",
+	fields   => [ [ 'size', 4, 'N' ], [ 'unknown', 4, 'N', [ '0x%08X', '%d' ] ] ],
+};
+$chunk_types->{cdtx} = {
+	code     => "CDTX",
+	fields   => [ [ 'size', 4, 'N' ] ],
+	lfields  => [
+		[ 'pack_type', 1, 'C', '%02X' ], [ 'track', 1, 'C' ],
+		[ 'pack_num', 1, 'C' ], [ 'block_char', 1, 'C', [ '%08B', '0x%02x' ] ],
+		[ 'text', 12, 'a12', '"%s"' ], [ 'crc', 2, 'n', '0x%04x' ] ],
+};
+$chunk_types->{mtyp} = {
+	code     => "MTYP",
+	fields   => [ [ 'size', 4, 'N' ], [ 'type', 4, 'N' ] ],
+};
+$chunk_types->{end} = {
+	code     => "END!",
+	fields   => [ [ 'size', 4, 'N' ] ],
+};
+$chunk_types->{unknown} = {
+	fields   => [ [ 'size', 4, 'N' ] ],
+};
+#	{ "NERO", "NER5" },
+#	{ "CUES", "CUEX" },
+#	{ "ETNF", "ETN2" },
+#	{ "DAOI", "DAOX" },
+#	{ "SINF", "SINF" },
+#	{ "END!", "END!" },
+
+# File parsing & processing
+sub process_file {
+	my ($process_iff, $nrg_name) = map shift, (0..1);
+	my ($nrg, $iff, $rc) = (undef, { }, 1);
+	unless (open $nrg, "<", $nrg_name . $ext) {
+		warn "ERROR Cannot open file '$nrg_name$ext' for reading: $!\n";
+		return;
+	}
+	binmode $nrg;
+	print "Locating the header at the end of the file\n" if ($verbose > 1);
+	seek $nrg, -4-$chunk_types->{nero}->{fields}->[0]->[1], SEEK_END;
+	read_chunk($nrg, $iff);
+	my $offset = $iff->{nero}->[0]->{fields}->[0];
+	unless (defined $offset) {
+		warn "ERROR The offset of the IFF chunk list in '$nrg_name' could not be determined\n";
+		return;
+	}
+	seek $nrg, 0, SEEK_SET if ($iff_only);
+	seek $nrg, $offset, SEEK_SET unless ($iff_only);
+	while (my $_ = read_chunk($nrg, $iff)) {
+		if ($_ < -1) {
+			warn  "ERROR while reading an IFF chunk; aborting\n";
+			return;
+		};
+		$rc = 0 if ($_ == -1); # report non fatal error
+	};
+	&$process_iff($iff, $nrg, $nrg_name) and ($rc);
+}
+# Read an IFF chunk at the current location in $nrg and set the fields' values in $iff
+  # $iff->{$type}->[$index]->{fields}->[$values]
+  # $iff->{$type}->[$index]->{lfields}->[$index]->[$values]
+sub read_chunk {
+	my ($nrg, $iff) = map shift, (0..1);
+	my $code = read_fixed($nrg, 4);
+	my $type = typeofcode($code);
+	unless ($type) {
+		warn "ERROR Unknown chunk code '" . printable($code) . "'\n";
+		return -2;
+	}
+	my ($rc, $pos) = (1, tell($nrg));
+	print "Reading chunk '$code' at offset $pos\n" if ($verbose > 1);
+	$iff->{$type} = [ ] unless (defined($iff->{$type}));
+	# read the fields
+	my $fields = $chunk_types->{$type}->{fields};
+	my $chunk = {
+		offset => $pos-4,
+		fields => [ map { unpack($_->[2], read_fixed($nrg, $_->[1])) } @$fields ],
+	};
+	push(@{$iff->{$type}}, $chunk);
+	if ($fields->[0]->[0] eq 'size') {
+		# find the chunk end
+		my $size = $chunk->{fields}->[0];
+		$pos += $fields->[0]->[1]+$size;
+		print "  Chunk ends at at offset $pos\n" if ($verbose > 1);
+		# read the lfields
+		if (defined($chunk_types->{$type}->{lfields})) {
+			$chunk->{lfields} = [ ] unless (defined($chunk->{lfields}));
+			my $lfields = $chunk_types->{$type}->{lfields};
+			until (tell($nrg) >= $pos) {
+				my $vals = [ map { unpack($_->[2], read_fixed($nrg, $_->[1])) } @$lfields ];
+				push(@{$chunk->{lfields}}, $vals)
+			}
+		}
+		# check that all the chunk has been processed
+		my $left = $pos-tell($nrg);
+		warn "ERROR Data ($left bytes) read after the end of the chunk $code\n", $rc = -1
+		  if ($left < 0);
+		warn "WARNING Remaining data ($left bytes) at the end of the chunk $code\n"
+		  if ($left > 0);
+		$pos++ if ($pos % 2);
+		seek $nrg, $pos, SEEK_SET;
+	}
+	return 0 if ($type eq 'end');
+	return $rc;
+}
+sub typeofcode {
+	my $code = shift;
+	for (keys %{$chunk_types}) {
+		defined($chunk_types->{$_}->{code}) or next;
+		return $_ if ($code eq $chunk_types->{$_}->{code});
+	}
+	return undef;
+}
+sub extract_iff {
+	my $iff = shift;
+	my ($src, $src_name) = map shift, (0..1);
+	my $offset = $iff->{nero}->[0]->{fields}->[0];
+	unless (defined($offset)) {
+		warn "ERROR Cannot find offset of the IFF\n";
+		return;
+	}
+	print "IFF offset: $offset\n" if ($verbose > 1);
+	# Dest file
+	my $dst_name = $src_name . $iff_ext;
+	unless ($force or !-e $dst_name) {
+		warn "Not extracting the IFF because '$dst_name' already exists\n";
+		return;
+	}
+	my $dst;
+    unless ($no_act or open $dst, ">", $dst_name) {
+		warn "ERROR Cannot open file '$dst_name' for writing: $!\n";
+		return;
+	}
+	binmode $dst unless ($no_act);
+	# Copy
+	my $rc = 1;
+	seek $src, $offset, SEEK_SET;
+	my $size = (stat($src))[7]-$offset;
+	my $buf = read_fixed($src, $size);
+	print $dst $buf or $rc = 0 unless ($no_act);
+	print "$size bytes written in '$dst_name'\n" if ($verbose);
+	close $dst unless ($no_act);
+	return $rc;
+}
+
+# Command processing
+sub process_cmd {
+	my $args = shift; my $cmd = shift @$args;
+	my $chunk_filter = (@$args) ? sub { grep { $_[0] eq $_ } @$args } : undef;
+	local *print_iff = walk_chunks(\&print_chunk, $chunk_filter);
+	local *hexdump_iff = walk_chunks(
+		sub { print "\n$chunk_types->{$_[0]}->{code}\n"; hexdump_chunk(@_) },
+		$chunk_filter
+	);
+	#*printhexdump_iff = walk_chunks(sub { print_chunk(@_); hexdump_chunk(@_) });
+	my $track_filter = sub {
+		for (@$args[0,1]) { defined($_) or next; ($_ == shift) or return };
+		return 1;
+	};
+	my $iff_only_warn = sub {
+		return $iff_only unless ($iff_only);
+		print "WARNING Command $cmd on a bare IFF file ignored\n";
+		process_file(sub { return 1 }, @_);
+		return $iff_only;
+	};
+	local *list_tracks = walk_tracks(\&list_track, $track_filter);
+	local *extract_tracks = walk_tracks(\&extract_track, $track_filter);
+	if ($cmd eq "help") {
+		Pod::Usage::pod2usage(
+			-verbose => 99,
+			-sections => "SYNOPSIS|COMMANDS",
+			-exitval => 0
+		);
+	} elsif ($cmd eq "types") {
+		for (keys %$chunk_types) { print "$_\n" unless ($_ eq 'unknown') };
+		1;
+	} elsif ($cmd eq "nop") {
+		process_file(sub { return 1 }, @_);
+	} elsif ($cmd eq "info") {
+		process_file(\&print_iff, @_);
+	} elsif ($cmd eq "hexdump") {
+		process_file(\&hexdump_iff, @_);
+	} elsif ($cmd eq "list") {
+		process_file(\&list_tracks, @_);
+	} elsif ($cmd eq "track") {
+		process_file(\&extract_tracks, @_) unless (&$iff_only_warn(@_));
+	} elsif ($cmd eq "iff") {
+		process_file(\&extract_iff, @_) unless (&$iff_only_warn(@_));
+	} else {
+		warn "ERROR Unknown command '$cmd'\n";
+		0;
+	}
+}
+# Main
+unless (process_cmd(\@ARGV, $nrg_name)) {
+	print "There was an error.\n" if ($verbose);
+	exit 1;
+} else {
+	exit;
+}
+
+# Chunks & Fields
+sub walk_chunks {
+	my ($process, $filter) = @_;
+	sub {
+		my $iff = shift;
+		my $rc = 1;
+		for my $type (keys %$iff) {
+			CHUNK: for my $chunk (@{$iff->{$type}}) {
+				next CHUNK if (defined($filter) and not &$filter($type, $chunk));
+				&$process($type, $chunk, @_) or $rc = 0;
+			}
+		}
+		return $rc;
+	}
+}
+sub print_chunk {
+	my ($type, $chunk) = map shift, (0..1);
+	map shift, (0..1);
+	print "$chunk_types->{$type}->{code} (at offset $chunk->{offset})\n";
+	print_fields($chunk_types->{$type}->{fields}, $chunk->{fields}) if ($verbose);
+	if (defined($chunk->{lfields})) {
+		for (my $i = 0; $i < @{$chunk->{lfields}}; $i++) {
+			printf "%s[%d]\n", $chunk_types->{$type}->{code}, $i+1;
+			print_fields($chunk_types->{$type}->{lfields}, $chunk->{lfields}->[$i]) if ($verbose);
+		}
+	}
+	print "\n" if ($verbose);
+	return 1;
+}
+sub print_fields {
+	my ($fields, $vals) = map shift, (0..1);
+	for (my $i = 0; $i < @{$vals}; $i++) {
+		my $field = $fields->[$i];
+		my @val = ( $vals->[$i] );
+		my $str = $val[0];
+		if (defined($field->[3])) {
+			my $fmts = (ref($field->[3]) eq 'ARRAY') ? $field->[3] : [ $field->[3] ];
+			$str = join(" ", map { sprintf($_, @val) } @$fmts);
+		}
+		print "($field->[1])$field->[0]: $str\n";
+	}
+	return 1;
+}
+sub hexdump_chunk {
+	my ($type, $chunk) = map shift, (0..1);
+	my ($src) = map shift, (0..1);
+	$type = $chunk_types->{$type};
+	seek $src, $chunk->{offset}, SEEK_SET;
+	my $first_f = $type->{fields}->[0];
+	my $size = 4+$first_f->[1];
+	$size += $chunk->{fields}->[0] if ($first_f->[0] eq 'size');
+	print hexdump( read_fixed($src, $size) );
+}
+
+# Sessions & Tracks
+sub walk_tracks {
+	my ($process, $filter) = @_;
+	sub {
+		my $iff = shift;
+		my $rc = 1;
+		for (my $sess = 1; $sess <= @{$iff->{sinf}}; $sess++) {
+			my $numoftrcks = $iff->{sinf}->[$sess-1]->{fields}->[1];
+			TRACK: for (my $trck = 0; $trck <= $numoftrcks; $trck++) {
+			# $trck is the ordinal index of the track in the current session, not the track number
+			# the track 0 is for the lead-in
+				my @params = ($sess, $trck, track_chunk($iff, $sess, $trck));
+				next TRACK if ($trck == 0 and defined($params[2]->{etnf}));
+				next TRACK if (defined($filter) and not &$filter(@params));
+				&$process(@params, @_) or $rc = 0;
+			}
+		}
+		return $rc;
+	}
+}
+sub list_track {
+	my ($sess, $trck, $chunk) = map shift, (0..2);
+	map shift, (0..1);
+	printf "SESSION %d TRACK %02d [%02d]\n", $sess, $chunk->{track}, $trck;
+	printf "  mode $chunk_types->{daoi}->{lfields}->[2]->[3] %db/s %db\n",
+	  $chunk->{mode}, $chunk->{sect_size}, $chunk->{end}-$chunk->{start}
+	  if ($verbose);
+	return 1;
+}
+# Extract the track at position $trck in session $sess from the image
+sub extract_track {
+	list_track(@_) if ($verbose);
+	my ($sess, $trck, $chunk) = map shift, (0..2);
+	my ($src, $src_name) = map shift, (0..1);
+	my $track_num = $chunk->{track};
+	my $start = $chunk->{start};
+	my $end = $chunk->{end};
+	my $sect_size = $chunk->{sect_size};
+	unless (defined($start) and defined($end)) {
+		warn "ERROR Cannot find start/end of track $track_num\n";
+		return;
+	}
+	unless (defined($sect_size)) {
+		warn "ERROR Cannot find sector size of track $track_num\n";
+		return;
+	}
+	printf "  start: $start\tend: $end\n" if ($verbose > 1);
+	# Dest file
+	my $dst_name = $src_name . sprintf($trk_ext, $sess, $track_num, $sess);
+	unless ($force or !-e $dst_name) {
+		warn "Skipping track $track_num because '$dst_name' already exists\n";
+		return;
+	}
+	my $dst;
+    unless ($no_act or open $dst, ">", $dst_name) {
+		warn "ERROR Cannot open file '$dst_name' for writing: $!\n";
+		return;
+	}
+	binmode $dst unless ($no_act);
+	# Copy
+	seek $src, $start, SEEK_SET;
+	my ($rc, $count) = (1, 0);
+	SECTOR: while (tell($src) + $sect_size <= $end) {
+		my $buf = read_fixed($src, $sect_size);
+		print $dst $buf unless ($no_act);
+		$count++;
+	}
+    print "$count sectors of size $sect_size from track $track_num written in '$dst_name'\n" if ($verbose);
+	if (my $left = $end-tell($src)) {
+		warn "ERROR Partial sector of size $left/$sect_size found in track $track_num\n";
+		$rc = 0;
+		my $buf = read_fixed($src, $left);
+		print $dst $buf unless ($no_act);
+	}
+	close $dst unless ($no_act);
+	return $rc;
+}
+sub session_chunk {
+	my ($iff, $sess) = map shift, @_;
+	my ($daoi_n, $etnf_n) = (0, 0);
+	my $next_session_chunk = sub {
+		my $chunk = { tracks => $iff->{sinf}->[$sess-1]->{fields}->[1] };
+		my $is_daoi = defined($iff->{daoi}->[$daoi_n]);
+		my $is_etnf = defined($iff->{etnf}->[$etnf_n]);
+		if ( $is_daoi and (not $is_etnf
+		  or ($iff->{daoi}->[$daoi_n]->{offset} < $iff->{etnf}->[$etnf_n]->{offset})) ) {
+			$chunk->{daoi} = $iff->{daoi}->[$daoi_n];
+			$chunk->{first} = $iff->{daoi}->[$daoi_n]->{fields}->[5];
+			$daoi_n++;
+		} elsif ($is_etnf) {
+			$chunk->{etnf} = $iff->{etnf}->[$etnf_n];
+			$chunk->{etnf_first} = 1; # TODO
+			$chunk->{first} = 1; # TODO
+			$etnf_n++;
+		}
+		$chunk;
+	};
+	( map &$next_session_chunk, (1..$sess) )[-1];
+}
+# (using index1 of the next track as the end because Nero records the end as the index0 of the next track)
+sub track_chunk () {
+	my ($iff, $sess, $trck) = map shift, @_;
+	my $chunk = session_chunk($iff, $sess);
+	$chunk->{track} = $chunk->{first} + $trck - 1;
+	if (defined $chunk->{daoi}) {
+		$chunk->{sect_size} = $chunk->{daoi}->{lfields}->[($trck) ? $trck-1 : $trck]->[1];
+		$chunk->{mode} = $chunk->{daoi}->{lfields}->[($trck) ? $trck-1 : $trck]->[2];
+		$chunk->{start} = ($trck)
+		  ? $chunk->{daoi}->{lfields}->[$trck-1]->[5]
+		  : $chunk->{daoi}->{lfields}->[$trck]->[4];
+		  # track 0 starts at index 0
+		$chunk->{end} = (defined($chunk->{daoi}->{lfields}->[$trck]))
+		  ? $chunk->{daoi}->{lfields}->[$trck]->[5]
+		  : $chunk->{daoi}->{lfields}->[$trck-1]->[6];
+		  # last track ends at next_index
+	} elsif (defined($chunk->{etnf})) {
+		warn "WARNING Only DAO discs are fully supported for now\n";
+		$chunk->{track_size} = $chunk->{etnf}->{lfields}->[($trck) ? $trck-1 : $trck]->[1];
+		$chunk->{track_length} = $chunk->{etnf}->{lfields}->[($trck) ? $trck-1 : $trck]->[5];
+		$chunk->{sect_size} = $chunk->{track_size} / $chunk->{track_length};
+		$chunk->{mode} = $chunk->{etnf}->{lfields}->[($trck) ? $trck-1 : $trck]->[2];
+		$chunk->{start} = ($trck)
+		  ? $chunk->{etnf}->{lfields}->[$trck-1]->[0]
+		  : 0;
+		$chunk->{end} = ($trck)
+		  ? $chunk->{start} + $chunk->{etnf}->{lfields}->[$trck-1]->[1]
+		  : 0;
+	}
+	$chunk;
+}
+
+# Misc
+sub read_fixed {
+	my ($file, $size) = @_;
+	my $buf;
+	my $n = read $file, $buf, $size;
+	die "ERROR Partial read of $n instead of $size\n" unless ($n == $size);
+	return $buf;
+}
+
+__END__
+
+=head1 DESCRIPTION
+
+C<nrgtool> processes a NRG disc image file.  It finds and parses the IFF
+footer, which contains the metadata; then it prints information or extracts
+some data.
+
+Images of all types of discs can be processed; in particular audio CDs (CDDA
+and CD-extra) and CD-ROM/DVD-ROM (including multi-session discs) have been
+tested.
+
+A track at position 0 is the lead-in of the session.  Tracks of DAO sessions
+are split at index 1 points.
+
+
+=head1 COMMANDS
+
+The default command is "info".
+
+=over 8
+
+=item B<help>
+
+Print a short usage message.
+
+=item B<info>    S<[ I<chunk_types> ]>
+
+Print the chunks' structure resulting of the parsing of the IFF.  Enbale
+verbose mode to view the fields' values.
+
+=item B<hexdump> S<[ I<chunk_types> ]>
+
+Print a hexdump for each chunk (of the selected types).
+
+=item B<nop>
+
+No op: only parse the IFF.
+
+=item B<list>    S<[ I<session> [ I<track_pos> ] ]>
+
+List the selected tracks.  In verbose mode, give some track attributes.
+
+=item B<track>   S<[ I<session> [ I<track_pos> ] ]>
+
+Extract the (raw) data of the selected tracks to files.
+
+=item B<iff>
+
+Extract the IFF header to a file.
+
+=item B<types>
+
+List the known chunk types.
+
+=back
+
+
+=head1 OPTIONS
+
+Options can be negated by prefixing them with "--no-" instead of "--".
+
+=over 8
+
+=item B<--version>
+
+Print the version information and exit.
+
+=item B<-h>, B<--help>
+
+Display part of the manual.
+
+=item B<-v>, B<--verbose>
+
+Verbose: print some or more information, depending on the command.
+
+If it is given twice, also print debugging information, notably during the
+parsing.
+
+=item B<-I>, B<--iff>
+
+IFF only: process a bare IFF file previously extracted by the command B<iff>.
+
+=item B<-n>, B<--no-act>
+
+No Action: test the reading of files but do not write any files.
+
+=item B<-f>, B<--force>
+
+Force: overwrite existing files.
+
+=item B<-1>, B<--nrgv1>
+
+NRG Version: Treat the file as a first version (prior to Nero 5.5) NRG; the
+default is to treat the file as a version 2 (Nero 5.5 and later).
+Unimplemented.
+
+=item B<-e>, B<--extension> I<ext>
+
+NRG Extension (empty by default): extension appended to the I<nrg> file name
+given on the command line to obtain the actual file name used; with this
+option, the generated files' names can be controlled somewhat.
+
+=item B<-t>, B<--track-ext> I<ext_fmt>
+
+Track Extension: printf format template for the tracks' file name extensions
+(appended to the S<nrg> file name); the first argument to printf is the session
+number, the second the track number, the third the session number; the default
+is ".s%02d-t%02d".
+
+=item B<-i>, B<--iff-ext> I<ext>
+
+IFF Extension: file name extension of the IFF file (appended to the S<nrg> file
+name given on the command line); it is ".iff" by default.
+
+=item B<-3>, B<--32>
+
+32-bit integer mode: if Perl does not have support for 64-bit integers, use
+this option to parse 64-bit integers as 32-bit (without using the 'Q' template
+of unpack()).  When this option is set, the image size cannot be as large.
+
+=back
+
+
+=head1 ENVIRONMENT
+
+No environment variables are used.
+
+
+=head1 EXAMPLES
+
+To view the result of the parsing:
+
+	nrgtool -v image.nrg | less
+
+To show the debugging output of the parsing:
+
+	nrgtool -vv image.nrg nop
+
+To view a hexdump of the CD-text chunk:
+
+	nrgtool image.nrg hexdump cdtx | less
+
+To list the tracks:
+
+	nrgtool image.nrg list
+
+To extract all the audio tracks of F<image.nrg> to F<image-XX.cdda>:
+
+	nrgtool -v -e .nrg -t '-%n%02d.cdda' image track 1
+
+To extract a data disc to an iso file F<image.nrg.iso>:
+
+	nrgtool -v -t .iso image.nrg track 1 1
+
+If a track contains sub-channel data, you can extract the audio/data with one
+of the following commands:
+
+	raw96cdconv -v image.nrg.s01-t16
+	raw96cdconv -v --iso image.nrg.s01-t01
+	raw96cdconv -v --sector-size 2336 image.nrg.s01-t01
+
+An audio track can be converted to WAV by sox(1):
+
+	sox -t .cdda -L image.nrg.s01-t16 image-16.wav
+
+
+=head1 BUGS
+
+C<nrgtool> has been tested with images created by Nerolinux 4.0 only.  Any
+resulting incompatibilties with other versions of Nero may be reported to the
+author.
+
+The NRG version 1 format is not supported because of the lack of
+sample image files.
+
+If you can reconstruct the same NRG from the extracted files, most probably
+C<nrgtool> can handle the particular image:
+
+	nrgtool image.nrg iff
+	nrgtool image.nrg track
+	cat image.nrg.s??-t?? image.nrg.iff >image.nrg.nrgtool
+	cmp image.nrg image.nrg.nrgtool && echo "nrgtool can extract all the data"
+
+In 32-bit mode, the size of images that can be processed is limited.
+
+See also the CDimg|tools distribution file F<BUGS>.
+
+
+=head1 AUTHOR
+
+G.raud Meyer
+
+=head1 SEE ALSO
+
+L<nero(1)>, L<raw96cdconv(1)>, L<sox(1)>
+
+=cut

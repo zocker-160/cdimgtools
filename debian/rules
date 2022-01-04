@@ -1,0 +1,28 @@
+#!/usr/bin/make -f
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+export DEB_BUILD_MAINT_OPTIONS := hardening=+all
+
+get-orig-source:
+	$(MAKE) deborig
+
+override_dh_auto_configure:
+	dh_auto_configure -- CPPFLAGS="$(shell dpkg-buildflags --get CPPFLAGS)" \
+	                     CFLAGS="$(shell dpkg-buildflags --get CFLAGS)" \
+	                     LDFLAGS="$(shell dpkg-buildflags --get LDFLAGS)"
+
+build:
+	$(MAKE) configure
+	dh build
+
+override_dh_auto_build:
+	$(MAKE) build
+	$(MAKE) doc-man doc-html
+
+override_dh_auto_install:
+	dh_auto_install
+	dh_auto_install -- install-doc
+	$(RM) $(CURDIR)/debian/cdimgtools/usr/share/doc/cdimgtools/INSTALL.html
+
+%:
+	dh $@

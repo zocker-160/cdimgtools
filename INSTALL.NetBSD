@@ -1,0 +1,10 @@
+See 'INSTALL' first.
+
+If the dependencies are in the standard pkgsrc locations, make sure that
++/usr/pkg/bin+ is in your `PATH` and build like this, possibly adding other
+desired options:
+
+[source,sh]
+$ ./configure MAKE=gmake CPPFLAGS="-I/usr/pkg/include" \
+    LDFLAGS="-L/usr/pkg/lib -R/usr/pkg/lib" --mandir='${prefix}/man'
+$ gmake

@@ -1,0 +1,83 @@
+# -*- mode: rpm-spec-mode; encoding: utf-8 -*-
+# vim: ft=spec noexpandtab
+# cdimgtools.spec: generated from cdimgtools.spec.in by Makefile
+# Pass '--without docs' to rpmbuild if you don't want the documentation to be built
+
+Name: 		cdimgtools
+Summary: 	command line tools to inspect and manipulate certain CD/DVD image files
+Version: 	@@VERSION@@
+Release: 	0.4%{?dist}
+License: 	GPLv2
+Group: 		Applications/Multimedia
+Vendor: 	Géraud Meyer <g_raud@gna.org>
+URL:		https://gna.org/projects/cdimgtools
+Source: 	%{name}-%{version}.tar.gz
+BuildRequires:	libdvdcss-devel, libdvdread-devel%{!?_without_docs:, asciidoc > 6.0.3, perl-doc}
+Requires: 	perl, libdvdcss, libdvdread
+
+%description
+CDimg|tools is a set of command line tools to inspect and manipulate CD/DVD
+optical disc images of formats uncommon on free UNIX-like systems (like
+GNU/Linux or BSD).
+
+raw96cdconv:
+  This command is a Perl script that demultiplexes/multiplexes stream data
+  (audio, raw data or .iso format data) and sub-channel data from a RAW+96
+  image file.  It handles optical disc images containing stream data and
+  sub-channel data of a given sector at contiguous positions; this kind of
+  image file may be either directly created by a ripping program like
+  readcd(1) or cdrdao(1), or extracted from another image file by
+  nrgtool(1).
+
+nrgtool:
+  This command is a Perl script that reads .nrg images (created by Nero),
+  prints the metadata about the image, and extracts, for each track, the raw
+  data to a separate file; disc types such as CDDA, CD-extra and
+  (multi-session) CD-ROM/DVD-ROM are supported.
+
+cssdec:
+  This command decrypts CSS-scrambled VOB files or streams found on DVD
+  Video discs; the title key is obtained transparently by libdvdcss.
+
+dvdimgdecss:
+  This command decrypts CSS-scrambled DVD Video discs or image files; it
+  writes a similar image file containing the same data at the same location;
+  the UDF filesystem of the disc is left intact.
+
+%prep
+%setup -q
+
+%build
+%configure
+%{__make} \
+	all %{!?_without_docs: doc-man doc-html} %{?_without_docs: doc-txt}
+
+%install
+[ "$RPM_BUILD_ROOT" != "/" ] && rm -rf $RPM_BUILD_ROOT
+%{__make} DESTDIR=$RPM_BUILD_ROOT \
+	install %{!?_without_docs: install-doc-man}
+
+%clean
+[ "$RPM_BUILD_ROOT" != "/" ] && rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(-,root,root)
+%{_bindir}/*
+%doc README NEWS INSTALL BUGS COPYING ChangeLog
+%{!?_without_docs: %{_mandir}/man1/*.1*}
+%{!?_without_docs: %doc *.html}
+%{?_without_docs:  %doc *.txt}
+
+%changelog
+* Tue Jan 08 2013 Géraud Meyer <graud@gmx.com>
+- Changelog renamed to ChangeLog
+* Mon Dec 31 2012 Géraud Meyer <graud@gmx.com>
+- Use autoconf
+- Depend on libdvdread
+- Install the text version of NEWS
+- Updated description
+* Fri Dec 14 2012 Géraud Meyer <graud@gmx.com>
+- Depend on libdvdcss
+- Disable noarch
+* Sun Nov 18 2012 Géraud Meyer <graud@gmx.com>
+- First packaging

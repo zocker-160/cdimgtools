@@ -1,0 +1,155 @@
+CDimg|tools was mainly written under a GNU/Linux OS but should work under other
+UNIX flavours, and perhaps even on other platforms, albeit maybe only partially
+(see <<dependencies, Dependencies>> below).
+
+
+Installation instructions
+-------------------------
+// An HTML version of this file is part of 'README.html'.
+
+The official source for release downloads is at
+<http://download.gna.org/cdimgtools/>.  The dependencies to build the package
+have to be installed first (see <<dependencies, Dependencies>> below).
+
+To install directly from the sources' tree, download a release archive and
+extract it.  The quick and simple way to install CDimg|tools with documentation
+in your home directory +~/.local+ is to run:
+
+[source,sh]
+$ make .help
+$ make
+$ make install install-doc
+
+Optionally, you can use the `configure` script to check for some dependencies
+and install system-wide in +/usr/local+:
+
+[source,sh]
+$ ./configure
+$ make
+$ sudo make install
+
+Running `configure` is optional but _recommended_.  To adjust the installation
+process (as well as the build process) you can tell `configure`.  For example:
+
+[source,sh]
+$ ./configure --help
+$ ./configure --prefix=/usr
+
+Or you can edit the file +config.make+ after a call to `configure`, or set the
+Makefile variables on the command line:
+
+[source,sh]
+$ make install prefix=$HOME/.local/stow/cdimgtools
+
+Distributors might use the +DESTDIR+ Makefile variable to install the files for
+packaging:
+
+[source,sh]
+$ make install DESTDIR=./packagefiles
+
+Documentation building
+~~~~~~~~~~~~~~~~~~~~~~
+To avoid the installation of the documentation tool chain, pre-compiled
+documentation files are available in the release archives.  To force the
+re-building of the documentation, delete the files first:
+
+[source,sh]
+$ make distclean doc-man doc-html
+
+RPM and DEB packages
+~~~~~~~~~~~~~~~~~~~~
+If your system uses one of these package management systems and you have
+administrative privileges to install software, it is probably better to
+download pre-packaged source +.rpm+ packages or +.dsc+ (Debian source)
+packages, then build them to binary packages to be installed by your
+distribution's package management system.
+
+For RPM, download the file with the extension +.src.rpm+, then:
+
+[source,sh]
+$ rpmbuild --rebuild --without docs cdimgtools-${version}-$RELEASE.src.rpm
+$ sudo rpm -i ~/rpmbuild/RPMS/$ARCH/cdimgtools-${version}-$RELEASE.$ARCH.rpm
+  # to install it
+
+For DEB, download the files with the extensions +.dsc+, +.orig.tar.gz+ and
++.debian.tar.gz+, then:
+
+[source,sh]
+$ dpkg-source -x cdimgtools_${version}-${REVISION}.dsc
+$ cd cdimgtools-${version}
+$ dpkg-buildpackage -rfakeroot -b -uc
+$ sudo dpkg -i ../cdimgtools_${version}-${REVISION}_$ARCH.deb
+  # to install it
+
+Alternatively binary packages pre-built for your architecture might be
+available for download.
+
+Or you can create binary (and source) packages directly from the sources' tree:
+
+[source,sh]
+# For RPM:
+$ make distclean
+$ make rpm RPMBUILD_FLAGS=""
+# For DEB:
+$ make distclean
+$ make deb DEBUILD_FLAGS="--no-lintian -us -uc"
+
+Verifying the signatures
+~~~~~~~~~~~~~~~~~~~~~~~~
+You need to have the
+link:https://gna.org/project/memberlist-gpgkeys.php?group=cdimgtools[GnuPG key]
+of the packager.
+
+[source,sh]
+$ gpg --keyring cdimgtools-keyring.gpg -v cdimgtools-${version}.tar.gz.sig
+$ gpg --keyring cdimgtools-keyring.gpg -v cdimgtools-${version}-$RELEASE.src.rpm.sig
+$ dscverify --keyring cdimgtools-keyring.gpg cdimgtools_${version}-${REVISION}.dsc
+
+
+[[dependencies]]
+Dependencies
+------------
+
+The following tools are required:
+
+[cols="3<,8<",options="header"]
+|=============================================================================
+|Tool               |Description
+|link:http://www.perl.org/[Perl] (>= 5)
+	|The scripts are written in perl.
+|Pod::Usage,
+  link:$$http://search.cpan.org/~evo/String-Escape/Escape.pm$$[String::Escape],
+  link:$$http://search.cpan.org/~dcantrell/Data-Hexdumper/lib/Data/Hexdumper.pm$$[Data::Hexdumper]
+	|Perl modules required.
+|a C compiler       |Only link:http://gcc.gnu.org[GCC] has been tested.
+|link:http://www.videolan.org/developers/libdvdcss.html[libdvdcss]
+	|For decrypting scrambled DVD Video discs.
+|link:http://dvdnav.mplayerhq.hu/[libdvdread]
+	|For locating VOB files in an UDF filesystem.
+|link:http://www.gnu.org/software/make/[GNU make]
+	|Used for building and installing.  Other make programs will not work.
+|=============================================================================
+
+The following optional tools and packages are needed for (re-)creating the
++configure+ script or for (re-)building the documentation:
+
+[cols="3<,8<",options="header"]
+|=============================================================================
+|Tool               |Description
+|link:http://www.gnu.org/software/autoconf/[GNU Autoconf]
+	|Contains autoreconf for generating configure from configure.ac.
+|link:http://www.methods.co.nz/asciidoc/[AsciiDoc] (>= 8.4)
+	|Generates HTML and (DocBook) XML from text.
+|link:http://www.gnu.org/software/src-highlite/[GNU Source-highlight]
+	|Used by asciidoc to highlight sh code.
+|link:http://perldoc.perl.org/index-utilities.html[perldoc]
+	|pod2man, pod2text, pod2html are used to extract the documentation from the
+	  perl scripts.
+|link:http://cyberelk.net/tim/software/xmlto/[xmlto]
+	|Generates UNIX manual pages from XML.
+|link:http://xmlsoft.org/XSLT/[xsltproc],
+  link:http://docbook.sourceforge.net[DocBook XSL] (>= 1.72.0)
+	|Used by xmlto for building the manual pages.
+|=============================================================================
+
+Furthermore, you might need the programs that build RPM or DEB packages.

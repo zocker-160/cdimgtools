@@ -1,0 +1,29 @@
+[[bugs]]
+Issues
+------
+
+Known bugs and limitations:
+
+* The image formats handled by some tools are not open: their logic can only
+  be guessed from sample files.  Consequently there can be absolutely no
+  guarantee that a tool can handle all files of the same formats appropriately.
+
+* For bugs and limitations specific to a particular command, see its manual
+  page.
+
+* Bugs recently discovered or other minor bugs may be listed online at
+  <https://gna.org/bugs/?group=cdimgtools>.
+
+Bug reports and feature requests are managed with the web issue trackers at
+link:https://gna.org/projects/cdimgtools[Gna!].  To submit a bug report:
+
+1. Check that the bug is not already known, by searching the sources listed
+   above; if it is already known, and if applicable, you might want to confirm
+   the bug, cite some other problematic cases etc.
+
+2. Try to reproduce the problem with the most up-to-date released version
+   available online.
+
+3. To submit a report about a new bug, fill in the form of the
+   link:https://gna.org/support/?func=additem&group=cdimgtools[suport tracker];
+   you do not need a Gna! account, although you can log in.
