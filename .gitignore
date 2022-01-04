@@ -30,3 +30,7 @@ pod2htm*
 *~
 .*.swp
 .#*
+
+.project
+
+.cproject
